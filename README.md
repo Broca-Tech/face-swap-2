@@ -1,36 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Akool Live Face Swap MVP
 
-## Getting Started
+This is a Next.js application that integrates Akool's Live Face Swap API with Agora for real-time video streaming.
 
-First, run the development server:
+## Setup
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1.  **Install Dependencies:**
+    ```bash
+    npm install
+    ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2.  **Environment Variables:**
+    Create a `.env.local` file in the root directory with the following keys:
+    ```env
+    # Akool API Credentials
+    AKOOL_API_KEY=your_akool_api_key_here
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+    # Agora Credentials
+    NEXT_PUBLIC_AGORA_APP_ID=your_agora_app_id_here
+    ```
+    *Note: You can find these keys in your existing project or Akool/Agora dashboards.*
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3.  **Source Image:**
+    Follow the instructions in `UPLOAD_INSTRUCTIONS.md` to set the target face image URL in `app/api/start-swap/route.ts`.
 
-## Learn More
+4.  **Run the App:**
+    ```bash
+    npm run dev
+    ```
+    Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-To learn more about Next.js, take a look at the following resources:
+## Usage
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1.  Click **Start Camera** to enable your webcam.
+2.  Once the camera is running, click **Start Face Swap**.
+3.  The app will join an Agora channel and trigger the Akool API.
+4.  The swapped video feed should appear in the "Swapped Feed" box.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Troubleshooting
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+*   **Camera not working:** Ensure you have granted browser permissions.
+*   **Swap not starting:** Check the server console for API errors. Ensure your API Key is correct.
+*   **Agora Connection Failed:** Check your App ID. Ensure your firewall allows UDP traffic.
