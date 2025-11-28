@@ -52,6 +52,7 @@ export default function FaceSwapApp() {
   const [showDualView, setShowDualView] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [changingFace, setChangingFace] = useState(false);
 
   // 自動でカメラをONにする
   useEffect(() => {
@@ -230,6 +231,34 @@ export default function FaceSwapApp() {
   const swappedUser = remoteUsers.length > 0 ? remoteUsers[0] : null;
   const canStart = localVideoTrack && selectedImageUrl;
 
+  // 変換中に顔を切り替える
+  const handleImageSelect = async (imageUrl: string) => {
+    // セッションがアクティブな場合は顔を更新
+    if (isStreaming && akoolSession?.sessionId) {
+      setChangingFace(true);
+      try {
+        const response = await axios.post('/api/update-face', {
+          sessionId: akoolSession.sessionId,
+          sourceImageUrl: imageUrl,
+        });
+
+        if (response.data.success) {
+          setSelectedImageUrl(imageUrl);
+        } else {
+          setError('顔の切り替えに失敗しました');
+        }
+      } catch (err: any) {
+        console.error('Failed to update face:', err);
+        setError(err.response?.data?.error || '顔の切り替えに失敗しました');
+      } finally {
+        setChangingFace(false);
+      }
+    } else {
+      // セッションがアクティブでない場合は単に選択
+      setSelectedImageUrl(imageUrl);
+    }
+  };
+
   return (
     <div style={{
       minHeight: '100vh',
@@ -370,8 +399,8 @@ export default function FaceSwapApp() {
                 }}
               >
                 <button
-                  onClick={() => !isEditMode && setSelectedImageUrl(image.url)}
-                  disabled={isEditMode}
+                  onClick={() => !isEditMode && handleImageSelect(image.url)}
+                  disabled={isEditMode || changingFace}
                   style={{
                     width: '100%',
                     height: '100%',
@@ -382,12 +411,12 @@ export default function FaceSwapApp() {
                       : '3px solid transparent',
                     padding: 0,
                     background: 'none',
-                    cursor: isEditMode ? 'default' : 'pointer',
+                    cursor: isEditMode || changingFace ? 'default' : 'pointer',
                     transition: 'all 0.2s',
                     boxShadow: selectedImageUrl === image.url
                       ? '0 0 20px rgba(139, 92, 246, 0.4)'
                       : 'none',
-                    opacity: isEditMode ? 0.7 : 1
+                    opacity: isEditMode ? 0.7 : changingFace ? 0.5 : 1
                   }}
                 >
                   <img
