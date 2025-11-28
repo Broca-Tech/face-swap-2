@@ -81,6 +81,18 @@ export default function FaceSwapApp() {
     autoStartCamera();
   }, [localVideoTrack, setLocalAudioTrack, setLocalVideoTrack]);
 
+  // コンポーネントアンマウント時にトラックをクリーンアップ
+  useEffect(() => {
+    return () => {
+      if (localVideoTrack) {
+        localVideoTrack.close();
+      }
+      if (localAudioTrack) {
+        localAudioTrack.close();
+      }
+    };
+  }, [localVideoTrack, localAudioTrack]);
+
   useEffect(() => {
     return () => {
       if (akoolSession?.sessionId) {
@@ -89,18 +101,18 @@ export default function FaceSwapApp() {
     };
   }, [akoolSession?.sessionId]);
 
-  const fetchImages = async () => {
-    try {
-      const response = await axios.get('/api/list-images');
-      if (response.data.success) {
-        setImages(response.data.images);
-      }
-    } catch (err) {
-      console.error('Failed to fetch images:', err);
-    }
-  };
-
   useEffect(() => {
+    const fetchImages = async () => {
+      try {
+        const response = await axios.get('/api/list-images');
+        if (response.data.success) {
+          setImages(response.data.images);
+        }
+      } catch (err) {
+        console.error('Failed to fetch images:', err);
+      }
+    };
+
     fetchImages();
   }, []);
 
@@ -156,7 +168,8 @@ export default function FaceSwapApp() {
         if (deletedImage && selectedImageUrl === deletedImage.url) {
           setSelectedImageUrl(null);
         }
-        await fetchImages();
+        // 削除された画像をステートから除外
+        setImages(prevImages => prevImages.filter(img => img.publicId !== publicId));
       }
     } catch (err: any) {
       setError(err.response?.data?.error || '削除に失敗しました');
@@ -229,6 +242,37 @@ export default function FaceSwapApp() {
 
   const swappedUser = remoteUsers.length > 0 ? remoteUsers[0] : null;
   const canStart = localVideoTrack && selectedImageUrl;
+
+  // OBS用URLの生成
+  const generateOBSUrl = () => {
+    if (!akoolSession) return '';
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const params = new URLSearchParams({
+      channel: akoolSession.agora.channelId,
+      appId: akoolSession.agora.appId,
+      token: akoolSession.agora.token || '',
+      userId: akoolSession.agora.userId
+    });
+    return `${baseUrl}/obs?${params.toString()}`;
+  };
+
+  const copyOBSUrl = async () => {
+    const url = generateOBSUrl();
+    if (!url) return;
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
+        setError('URLをコピーしました');
+        setTimeout(() => setError(''), 2000);
+      } else {
+        setError('クリップボードが利用できません');
+      }
+    } catch (err) {
+      console.error('Failed to copy URL:', err);
+      setError('URLのコピーに失敗しました');
+    }
+  };
 
   return (
     <div style={{
@@ -656,6 +700,135 @@ export default function FaceSwapApp() {
         </section>
       </main>
 
+      {/* OBS Integration Section */}
+      {isStreaming && akoolSession && (
+        <section style={{
+          maxWidth: '1600px',
+          margin: '0 auto',
+          width: '100%',
+          background: 'rgba(255, 255, 255, 0.03)',
+          borderRadius: '24px',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          padding: '32px'
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '24px'
+          }}>
+            {/* Left: Info */}
+            <div style={{ flex: 1 }}>
+              <h2 style={{
+                fontSize: '20px',
+                fontWeight: '600',
+                color: '#ffffff',
+                margin: '0 0 12px 0',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2">
+                  <rect x="2" y="3" width="20" height="14" rx="2" />
+                  <path d="M8 21h8M12 17v4" />
+                </svg>
+                OBS Studio連携
+              </h2>
+              <p style={{
+                fontSize: '14px',
+                color: 'rgba(255, 255, 255, 0.6)',
+                margin: '0 0 24px 0',
+                lineHeight: '1.6'
+              }}>
+                変換後の映像をOBS Studioで取り込むことができます。<br />
+                下記のURLをOBSの「Browser Source」に追加してください。
+              </p>
+
+              {/* URL Display */}
+              <div style={{
+                background: 'rgba(0, 0, 0, 0.3)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '12px',
+                padding: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px'
+              }}>
+                <code style={{
+                  flex: 1,
+                  fontSize: '13px',
+                  color: '#8b5cf6',
+                  fontFamily: 'monospace',
+                  wordBreak: 'break-all',
+                  lineHeight: '1.5'
+                }}>
+                  {generateOBSUrl()}
+                </code>
+                <button
+                  onClick={copyOBSUrl}
+                  style={{
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(139, 92, 246, 0.3)',
+                    background: 'rgba(139, 92, 246, 0.1)',
+                    cursor: 'pointer',
+                    color: '#8b5cf6',
+                    fontSize: '13px',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.background = 'rgba(139, 92, 246, 0.2)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.background = 'rgba(139, 92, 246, 0.1)';
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                  </svg>
+                  コピー
+                </button>
+              </div>
+            </div>
+
+            {/* Right: Instructions */}
+            <div style={{
+              width: '400px',
+              background: 'rgba(139, 92, 246, 0.05)',
+              border: '1px solid rgba(139, 92, 246, 0.15)',
+              borderRadius: '16px',
+              padding: '24px'
+            }}>
+              <h3 style={{
+                fontSize: '15px',
+                fontWeight: '600',
+                color: '#ffffff',
+                margin: '0 0 16px 0'
+              }}>
+                OBSでの設定方法
+              </h3>
+              <ol style={{
+                fontSize: '13px',
+                color: 'rgba(255, 255, 255, 0.7)',
+                margin: 0,
+                paddingLeft: '20px',
+                lineHeight: '2'
+              }}>
+                <li>OBS Studioで「+」→「ブラウザ」を選択</li>
+                <li>上記のURLを「URL」欄に貼り付け</li>
+                <li>幅: 1920、高さ: 1080 を設定</li>
+                <li>「OK」をクリックして完了</li>
+              </ol>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Error Message */}
       {error && (
         <div style={{
@@ -663,13 +836,17 @@ export default function FaceSwapApp() {
           bottom: '32px',
           left: '50%',
           transform: 'translateX(-50%)',
-          background: 'rgba(239, 68, 68, 0.95)',
+          background: error === 'URLをコピーしました'
+            ? 'rgba(34, 197, 94, 0.95)'
+            : 'rgba(239, 68, 68, 0.95)',
           color: 'white',
           padding: '16px 32px',
           borderRadius: '50px',
           fontSize: '14px',
           fontWeight: '500',
-          boxShadow: '0 4px 24px rgba(239, 68, 68, 0.4)',
+          boxShadow: error === 'URLをコピーしました'
+            ? '0 4px 24px rgba(34, 197, 94, 0.4)'
+            : '0 4px 24px rgba(239, 68, 68, 0.4)',
           zIndex: 1000
         }}>
           {error}
