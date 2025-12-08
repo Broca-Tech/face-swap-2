@@ -1,60 +1,63 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
-import MediaPlayer from '../../components/MediaPlayer';
-import useAgora from '../../hooks/useAgora';
+import { useState, useEffect, useRef } from 'react';
+
+// グローバルに公開する型
+declare global {
+  interface Window {
+    setVideoStream?: (stream: MediaStream) => void;
+    clearVideoStream?: () => void;
+    obsReady?: boolean;
+  }
+}
 
 export default function OBSPage() {
-  const searchParams = useSearchParams();
-  const channelId = searchParams.get('channel');
-  const appId = searchParams.get('appId');
-  const token = searchParams.get('token');
-  const userId = searchParams.get('userId');
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [pendingStream, setPendingStream] = useState<MediaStream | null>(null);
+  const [isReceiving, setIsReceiving] = useState(false);
 
-  const [client, setClient] = useState<any>(null);
-  const [error, setError] = useState('');
-
-  // Initialize Agora client
   useEffect(() => {
-    (async () => {
-      if (typeof window !== 'undefined') {
-        const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
-        const c = AgoraRTC.createClient({ codec: 'vp8', mode: 'live' });
-        setClient(c);
-      }
-    })();
-  }, []);
+    document.title = 'Face Swap - OBS用';
 
-  const { remoteUsers, setJoinState } = useAgora(client);
-
-  // Auto-join channel when parameters are available
-  useEffect(() => {
-    const joinChannel = async () => {
-      if (!client || !channelId || !appId || !userId) return;
-
-      try {
-        await client.setClientRole('audience');
-        const numericUserId = parseInt(userId, 10) || 0;
-        await client.join(appId, channelId, token || null, numericUserId + 1000);
-        setJoinState(true);
-      } catch (e: any) {
-        console.error('Failed to join channel:', e);
-        setError('チャンネルへの接続に失敗しました');
-      }
+    // メインページから呼び出される関数を設定
+    window.setVideoStream = (stream: MediaStream) => {
+      console.log('setVideoStream called with:', stream);
+      console.log('stream tracks:', stream.getTracks());
+      // streamをstateに保存（videoRefがまだnullの可能性があるため）
+      setPendingStream(stream);
     };
 
-    joinChannel();
+    window.clearVideoStream = () => {
+      setPendingStream(null);
+      setIsReceiving(false);
+    };
+
+    // 準備完了フラグ
+    window.obsReady = true;
+    console.log('OBS page ready, window.setVideoStream is set');
 
     return () => {
-      if (client) {
-        client.leave().catch(console.error);
-      }
+      delete window.setVideoStream;
+      delete window.clearVideoStream;
+      delete window.obsReady;
     };
-  }, [client, channelId, appId, token, userId, setJoinState]);
+  }, []);
 
-  // Get the swapped (algorithm) user - should be the remote user with algorithmUserId
-  const swappedUser = remoteUsers.find(user => user.uid !== parseInt(userId || '0', 10));
+  // pendingStreamが設定されたらvideoに適用
+  useEffect(() => {
+    if (pendingStream && videoRef.current) {
+      console.log('Applying stream to video element');
+      videoRef.current.srcObject = pendingStream;
+      videoRef.current.play()
+        .then(() => {
+          console.log('Video playing successfully');
+          setIsReceiving(true);
+        })
+        .catch((err) => {
+          console.error('Video play error:', err);
+        });
+    }
+  }, [pendingStream]);
 
   return (
     <div style={{
@@ -62,46 +65,48 @@ export default function OBSPage() {
       height: '100vh',
       background: '#000',
       overflow: 'hidden',
-      position: 'relative'
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
     }}>
-      {swappedUser?.videoTrack ? (
-        // 変換後の映像を左右反転して全画面表示
-        <div style={{ width: '100%', height: '100%', transform: 'scaleX(-1)' }}>
-          <MediaPlayer
-            videoTrack={swappedUser.videoTrack}
-            audioTrack={swappedUser.audioTrack}
-            className="w-full h-full object-cover"
-          />
-        </div>
-      ) : (
-        <div style={{
+      {/* videoは常にDOMに存在させる（refが取れるように） */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        style={{
           width: '100%',
           height: '100%',
+          objectFit: 'cover',
+          transform: 'scaleX(-1)', // 左右反転
+          display: isReceiving ? 'block' : 'none'
+        }}
+      />
+
+      {/* 待機中の表示 */}
+      {!isReceiving && (
+        <div style={{
+          position: 'absolute',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
           flexDirection: 'column',
+          alignItems: 'center',
           gap: '16px',
           color: 'rgba(255, 255, 255, 0.6)',
           fontSize: '18px'
         }}>
-          {error ? (
-            <div style={{ color: '#ef4444' }}>{error}</div>
-          ) : !channelId || !appId ? (
-            <div>URLパラメータが不正です</div>
-          ) : (
-            <>
-              <div style={{
-                width: '48px',
-                height: '48px',
-                border: '3px solid rgba(139, 92, 246, 0.5)',
-                borderTopColor: '#8b5cf6',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite'
-              }} />
-              <div>変換映像を待機中...</div>
-            </>
-          )}
+          <div style={{
+            width: '48px',
+            height: '48px',
+            border: '3px solid rgba(139, 92, 246, 0.5)',
+            borderTopColor: '#8b5cf6',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }} />
+          <div>変換映像を待機中...</div>
+          <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>
+            メインページで変換を開始してください
+          </div>
         </div>
       )}
 

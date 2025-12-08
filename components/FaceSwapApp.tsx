@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import useAgora from '../hooks/useAgora';
 import MediaPlayer from './MediaPlayer';
 import axios from 'axios';
@@ -52,6 +52,11 @@ export default function FaceSwapApp() {
   const [showDualView, setShowDualView] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // VDO.Ninja OBS連携用
+  const [vdoStreamId, setVdoStreamId] = useState<string | null>(null);
+  const [isVdoConnected, setIsVdoConnected] = useState(false);
+  const obsWindowRef = useRef<Window | null>(null);
 
   // 自動でカメラをONにする
   useEffect(() => {
@@ -235,6 +240,8 @@ export default function FaceSwapApp() {
 
       setAkoolSession(null);
       setIsStreaming(false);
+      setIsVdoConnected(false);
+      setVdoStreamId(null);
     } catch (e: any) {
       setError('セッション停止エラー');
     }
@@ -243,27 +250,119 @@ export default function FaceSwapApp() {
   const swappedUser = remoteUsers.length > 0 ? remoteUsers[0] : null;
   const canStart = localVideoTrack && selectedImageUrl;
 
-  // OBS用URLの生成
-  const generateOBSUrl = () => {
-    if (!akoolSession) return '';
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-    const params = new URLSearchParams({
-      channel: akoolSession.agora.channelId,
-      appId: akoolSession.agora.appId,
-      token: akoolSession.agora.token || '',
-      userId: akoolSession.agora.userId
-    });
-    return `${baseUrl}/obs?${params.toString()}`;
-  };
+  // VDO.Ninja用のストリームIDを生成
+  const generateStreamId = useCallback(() => {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = '';
+    for (let i = 0; i < 12; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+  }, []);
 
-  const copyOBSUrl = async () => {
-    const url = generateOBSUrl();
-    if (!url) return;
+  // VDO.Ninja OBS連携を開始（スクリーンキャプチャ方式）
+  const startVdoNinja = useCallback(async () => {
+    if (!swappedUser?.videoTrack) {
+      setError('変換後の映像がありません');
+      return;
+    }
+
+    try {
+      // ストリームIDを生成
+      const streamId = generateStreamId();
+      setVdoStreamId(streamId);
+
+      // /obsページを開く
+      const obsWindow = window.open('/obs', 'faceswap_obs', 'width=1280,height=720');
+      if (!obsWindow) {
+        setError('ポップアップがブロックされました。許可してください。');
+        return;
+      }
+      obsWindowRef.current = obsWindow;
+
+      // /obsページが読み込まれるまで待ってから映像を渡す
+      const mediaStreamTrack = swappedUser.videoTrack.getMediaStreamTrack();
+      console.log('mediaStreamTrack:', mediaStreamTrack);
+
+      // VDO.Ninjaを開く関数
+      const openVdoNinja = () => {
+        const vdoUrl = `https://vdo.ninja/?push=${streamId}&screenshare2&quality=2&noaudio&autostart`;
+        const popup = window.open(vdoUrl, 'vdo_ninja', 'width=600,height=500');
+
+        if (popup) {
+          setIsVdoConnected(true);
+        } else {
+          setError('VDO.Ninjaのポップアップがブロックされました。');
+        }
+      };
+
+      if (mediaStreamTrack) {
+        const stream = new MediaStream([mediaStreamTrack]);
+        console.log('Created MediaStream:', stream);
+
+        // ページ読み込み完了を待つ
+        let retryCount = 0;
+        const maxRetries = 50; // 5秒間リトライ
+
+        const sendStream = () => {
+          retryCount++;
+          try {
+            console.log(`sendStream attempt ${retryCount}`);
+
+            if (obsWindow.closed) {
+              console.log('OBS window was closed');
+              return;
+            }
+
+            if ((obsWindow as any).setVideoStream && (obsWindow as any).obsReady) {
+              console.log('Calling setVideoStream');
+              (obsWindow as any).setVideoStream(stream);
+              // ストリーム送信成功後にVDO.Ninjaを開く
+              setTimeout(openVdoNinja, 500);
+            } else if (retryCount < maxRetries) {
+              // まだ読み込まれていない場合はリトライ
+              setTimeout(sendStream, 100);
+            } else {
+              console.error('Failed to send stream after max retries');
+              setError('OBSページへの映像送信に失敗しました');
+            }
+          } catch (err) {
+            console.error('sendStream error:', err);
+            if (retryCount < maxRetries) {
+              setTimeout(sendStream, 100);
+            }
+          }
+        };
+        setTimeout(sendStream, 500);
+      } else {
+        // mediaStreamTrackがない場合でもVDO.Ninjaは開く
+        setTimeout(openVdoNinja, 1000);
+      }
+
+    } catch (err: any) {
+      console.error('VDO.Ninja connection error:', err);
+      setError('VDO.Ninja接続に失敗しました');
+    }
+  }, [swappedUser?.videoTrack, generateStreamId]);
+
+  // OBS用の視聴URLを生成
+  const getObsViewUrl = useCallback(() => {
+    if (!vdoStreamId) return '';
+    return `https://vdo.ninja/?view=${vdoStreamId}&solo&cleanoutput`;
+  }, [vdoStreamId]);
+
+  // OBS URLをコピー
+  const copyObsUrl = async () => {
+    const url = getObsViewUrl();
+    if (!url) {
+      setError('先にOBS連携を開始してください');
+      return;
+    }
 
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
         await navigator.clipboard.writeText(url);
-        setError('URLをコピーしました');
+        setError('OBS用URLをコピーしました');
         setTimeout(() => setError(''), 2000);
       } else {
         setError('クリップボードが利用できません');
@@ -700,8 +799,8 @@ export default function FaceSwapApp() {
         </section>
       </main>
 
-      {/* OBS Integration Section */}
-      {isStreaming && akoolSession && (
+      {/* OBS Integration Section (VDO.Ninja) */}
+      {isStreaming && swappedUser && (
         <section style={{
           maxWidth: '1600px',
           margin: '0 auto',
@@ -731,7 +830,7 @@ export default function FaceSwapApp() {
                   <rect x="2" y="3" width="20" height="14" rx="2" />
                   <path d="M8 21h8M12 17v4" />
                 </svg>
-                OBS Studio連携
+                OBS Studio連携（VDO.Ninja）
               </h2>
               <p style={{
                 fontSize: '14px',
@@ -739,61 +838,101 @@ export default function FaceSwapApp() {
                 margin: '0 0 24px 0',
                 lineHeight: '1.6'
               }}>
-                変換後の映像をOBS Studioで取り込むことができます。<br />
-                下記のURLをOBSの「Browser Source」に追加してください。
+                VDO.Ninjaを使って変換後の映像をOBSに送信します。
               </p>
 
-              {/* URL Display */}
-              <div style={{
-                background: 'rgba(0, 0, 0, 0.3)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                borderRadius: '12px',
-                padding: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px'
-              }}>
-                <code style={{
-                  flex: 1,
-                  fontSize: '13px',
-                  color: '#8b5cf6',
-                  fontFamily: 'monospace',
-                  wordBreak: 'break-all',
-                  lineHeight: '1.5'
-                }}>
-                  {generateOBSUrl()}
-                </code>
+              {!isVdoConnected ? (
+                // 接続前: 開始ボタン
                 <button
-                  onClick={copyOBSUrl}
+                  onClick={startVdoNinja}
                   style={{
-                    padding: '10px 20px',
-                    borderRadius: '8px',
-                    border: '1px solid rgba(139, 92, 246, 0.3)',
-                    background: 'rgba(139, 92, 246, 0.1)',
-                    cursor: 'pointer',
-                    color: '#8b5cf6',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    transition: 'all 0.2s',
-                    flexShrink: 0,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '8px'
-                  }}
-                  onMouseOver={(e) => {
-                    e.currentTarget.style.background = 'rgba(139, 92, 246, 0.2)';
-                  }}
-                  onMouseOut={(e) => {
-                    e.currentTarget.style.background = 'rgba(139, 92, 246, 0.1)';
+                    gap: '10px',
+                    padding: '14px 28px',
+                    borderRadius: '12px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%)',
+                    cursor: 'pointer',
+                    color: '#ffffff',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    boxShadow: '0 4px 24px rgba(139, 92, 246, 0.4)',
+                    transition: 'all 0.2s'
                   }}
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="9" y="9" width="13" height="13" rx="2" />
-                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M13.8 12H3" />
                   </svg>
-                  コピー
+                  OBS連携を開始
                 </button>
-              </div>
+              ) : (
+                // 接続後: URL表示
+                <>
+                  <div style={{
+                    background: 'rgba(34, 197, 94, 0.1)',
+                    border: '1px solid rgba(34, 197, 94, 0.3)',
+                    borderRadius: '12px',
+                    padding: '12px 16px',
+                    marginBottom: '16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    color: '#22c55e',
+                    fontSize: '14px'
+                  }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                    VDO.Ninja に接続中
+                  </div>
+
+                  <div style={{
+                    background: 'rgba(0, 0, 0, 0.3)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '12px',
+                    padding: '16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px'
+                  }}>
+                    <code style={{
+                      flex: 1,
+                      fontSize: '13px',
+                      color: '#8b5cf6',
+                      fontFamily: 'monospace',
+                      wordBreak: 'break-all',
+                      lineHeight: '1.5'
+                    }}>
+                      {getObsViewUrl()}
+                    </code>
+                    <button
+                      onClick={copyObsUrl}
+                      style={{
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(139, 92, 246, 0.3)',
+                        background: 'rgba(139, 92, 246, 0.1)',
+                        cursor: 'pointer',
+                        color: '#8b5cf6',
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        flexShrink: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" />
+                        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                      </svg>
+                      コピー
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Right: Instructions */}
@@ -810,7 +949,7 @@ export default function FaceSwapApp() {
                 color: '#ffffff',
                 margin: '0 0 16px 0'
               }}>
-                OBSでの設定方法
+                使い方
               </h3>
               <ol style={{
                 fontSize: '13px',
@@ -819,10 +958,12 @@ export default function FaceSwapApp() {
                 paddingLeft: '20px',
                 lineHeight: '2'
               }}>
-                <li>OBS Studioで「+」→「ブラウザ」を選択</li>
-                <li>上記のURLを「URL」欄に貼り付け</li>
-                <li>幅: 1920、高さ: 1080 を設定</li>
-                <li>「OK」をクリックして完了</li>
+                <li>「OBS連携を開始」をクリック</li>
+                <li>OBS用ウィンドウとVDO.Ninjaが開きます</li>
+                <li>VDO.Ninjaで「Chromeタブ」を選択</li>
+                <li>「Face Swap - OBS用」タブを選択して共有</li>
+                <li>表示されたURLをコピー</li>
+                <li>OBSで「ソース追加」→「ブラウザ」→URLを貼り付け</li>
               </ol>
             </div>
           </div>
