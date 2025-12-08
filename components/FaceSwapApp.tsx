@@ -999,29 +999,30 @@ export default function FaceSwapApp() {
         </section>
       )}
 
-      {/* Error Message */}
-      {error && (
-        <div style={{
-          position: 'fixed',
-          bottom: '32px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: error === 'URLをコピーしました'
-            ? 'rgba(34, 197, 94, 0.95)'
-            : 'rgba(239, 68, 68, 0.95)',
-          color: 'white',
-          padding: '16px 32px',
-          borderRadius: '50px',
-          fontSize: '14px',
-          fontWeight: '500',
-          boxShadow: error === 'URLをコピーしました'
-            ? '0 4px 24px rgba(34, 197, 94, 0.4)'
-            : '0 4px 24px rgba(239, 68, 68, 0.4)',
-          zIndex: 1000
-        }}>
-          {error}
-        </div>
-      )}
+      {/* Error/Success Message */}
+      {error && (() => {
+        const isSuccess = error.includes('コピーしました');
+        const bgColor = isSuccess ? 'rgba(139, 92, 246, 0.95)' : 'rgba(239, 68, 68, 0.95)';
+        const shadowColor = isSuccess ? 'rgba(139, 92, 246, 0.4)' : 'rgba(239, 68, 68, 0.4)';
+        return (
+          <div style={{
+            position: 'fixed',
+            bottom: '32px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: bgColor,
+            color: 'white',
+            padding: '16px 32px',
+            borderRadius: '50px',
+            fontSize: '14px',
+            fontWeight: '500',
+            boxShadow: `0 4px 24px ${shadowColor}`,
+            zIndex: 1000
+          }}>
+            {error}
+          </div>
+        );
+      })()}
 
       <style jsx>{`
         @keyframes spin {
